@@ -179,6 +179,26 @@ header{display:flex;align-items:center;gap:12px;height:56px;padding:0 16px;
 .gearmenu button.gact:hover{background:var(--c-line)}
 .gearmenu button.gact.gdanger{border-color:var(--bad)}
 .gearmenu button.gact.gdanger:hover{background:var(--c-line)}
+/* the mixer (V56): chip summary + a left-anchored gear-style menu */
+.mixchip{position:relative}
+#mixbtn{display:flex;align-items:center;gap:6px;background:transparent;border:none;padding:0;
+  margin-top:1px;color:var(--c-text);font-family:var(--mono);font-size:13px;font-weight:700;
+  cursor:pointer;max-width:230px;white-space:nowrap}
+#mixbtn .caret{color:var(--c-muted);font-size:11px}
+#mixbtn:hover .caret{color:var(--c-gold)}
+#mixsum{overflow:hidden;text-overflow:ellipsis}
+#mixsum .calls{color:var(--c-brand)}
+#mixsum .n{color:var(--c-muted);font-weight:400;font-size:11px;margin-left:4px}
+.mixmenu{left:-1px;right:auto;top:calc(100% + 4px);min-width:236px;text-align:left}
+.mixmenu .glab{font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--c-muted);
+  padding:4px 10px 5px}
+.mixmenu .gtoggle span:first-child{font-family:var(--mono);font-size:12.5px}
+.mixmenu .gtoggle:disabled{opacity:.45;cursor:default}
+#mixcalls.on span:first-child{color:var(--c-brand)}
+#mixcalls.on .sw{background:var(--c-brand)}
+.mixmenu .gfoot{display:flex;justify-content:space-between;align-items:baseline;padding:8px 10px 3px;
+  font-size:10px;color:var(--c-muted);letter-spacing:.04em}
+#mixrun{font-family:var(--mono);font-size:11px;color:var(--c-text)}
 
 /* ---------- topbar chips row ---------- */
 .topbar{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;
@@ -842,7 +862,7 @@ textarea{width:100%;font:inherit;padding:8px;border:1px solid var(--line);
       <button id="menuSleeper" class="gact">Import Sleeper values</button>
       <button id="menuReset" class="gact gdanger">Clear all sales</button>
       <div class="gdiv"></div>
-      <div class="ver gver">V55</div>
+      <div class="ver gver">V56</div>
     </div>
   </span>
 </header>

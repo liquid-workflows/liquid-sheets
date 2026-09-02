@@ -471,7 +471,6 @@ async function saveLeagueEdit() {
   wizardState.editing = false;
   if (Object.keys(doc.sources).length) {
     await makeRun();
-    doc.ui.run = null;              // newest run becomes current
     await saveDoc(doc);
   }
   renderBoardScreen();
@@ -593,30 +592,53 @@ async function doFetchSleeper() {
   await makeRun();
 }
 
-async function makeRun() {
+/* Build (synchronously) a run from a chosen subset of sources - the mixer (V56).
+ * Every mix is a real run in doc.runs (traceable by its #), reused when the same
+ * sources at the same as-of dates already have one. Returns the run. */
+function buildRun(sources) {
   const cfg = doc.league;
-  const sourceNames = Object.keys(doc.sources);
-  if (!sourceNames.length) return;
-  let asOf, players, label;
-  if (sourceNames.length > 1) {
-    ({ asOf, players } = blendProjections(doc.sources, cfg.scoring));
-    label = "blend";
+  const all = Object.keys(doc.sources);
+  const use = (sources && sources.length ? sources : all).filter((s) => all.includes(s)).sort();
+  if (!use.length) return null;
+  const isAll = use.length === all.length;
+  let asOf, players;
+  if (use.length > 1) {
+    ({ asOf, players } = blendProjections(doc.sources, cfg.scoring,
+      all.filter((s) => !use.includes(s))));
   } else {
-    const s = doc.sources[sourceNames[0]];
-    asOf = `${sourceNames[0]}@${s.as_of}`;
+    const s = doc.sources[use[0]];
+    asOf = `${use[0]}@${s.as_of}`;
     players = s.players;
-    label = sourceNames[0];
   }
+  const label = isAll && use.length > 1 ? "blend" : use.join("+");
+  const existing = doc.runs.find((r) => r.source_label === label && r.as_of === asOf);
+  if (existing) return existing;
   const result = valueBoard(cfg, players,
     doc.ui.availFade === false ? [] : PRIOR);   // fade toggle: empty prior = no fade
-  doc.runs.push({
+  const run = {
     run_id: doc.runs.length + 1,
     created_at: new Date().toISOString(),
-    source_label: label, as_of: asOf,
+    source_label: label, as_of: asOf, sources: use,
     meta: result.meta,
     players: result.players,
-  });
+  };
+  doc.runs.push(run);
+  return run;
+}
+
+async function makeRun() {
+  if (!Object.keys(doc.sources).length) return;
+  buildRun(null);                 // the full blend, as before
   await saveDoc(doc);
+}
+
+/* the mixer's state: which sources are in the average + whether My Calls are
+ * layered on. null sources = every source (a new import joins automatically). */
+function mixState() {
+  const all = Object.keys(doc.sources);
+  const m = doc.ui?.mix || {};
+  const on = (m.sources || all).filter((s) => all.includes(s));
+  return { on: on.length ? on : all, calls: m.calls !== false && (doc.calls || []).length > 0 };
 }
 
 /* -------------------------------------------------------------- import */
@@ -1011,7 +1033,7 @@ function callOf(pid) {
 
 /* the base (un-nudged) our$ for a player, from the latest real run */
 function baseValueOf(pid) {
-  const base = doc.runs[doc.runs.length - 1];
+  const base = Object.keys(doc.sources).length ? buildRun(mixState().on) : doc.runs[doc.runs.length - 1];
   const bp = base?.players.find((x) => x.player_id === pid);
   return bp ? Math.max(1, Math.round(bp.dollar)) : null;
 }
@@ -1020,8 +1042,7 @@ function baseValueOf(pid) {
 async function setCall(pid, delta) {
   doc.calls = (doc.calls || []).filter((x) => x.pid !== pid);
   if (delta !== 0) doc.calls.push({ pid, delta });
-  if (doc.calls.length) doc.ui.run = "calls";
-  else if (doc.ui.run === "calls") doc.ui.run = null;
+  doc.ui.mix = { ...(doc.ui.mix || {}), calls: doc.calls.length > 0 };
   await saveDoc(doc);
   refreshRoom();
   openModal(pid);
@@ -1044,11 +1065,17 @@ function deriveCallsRun(base) {
 }
 
 function buildModel() {
-  const baseReal = doc.runs[doc.runs.length - 1] ?? null;
-  if (doc.ui?.run === "calls" && (doc.calls || []).length && baseReal) {
-    curRun = deriveCallsRun(baseReal);
+  /* the mixer (V56): the board is the run for the lit sources; My Calls layer on
+   * top when lit. Missing mixes are built here, synchronously, and saved. */
+  let baseReal = null;
+  if (Object.keys(doc.sources).length) {
+    const mx = mixState();
+    const before = doc.runs.length;
+    baseReal = buildRun(mx.on);
+    if (doc.runs.length !== before) saveDoc(doc);
+    curRun = (mx.calls && baseReal) ? deriveCallsRun(baseReal) : baseReal;
   } else {
-    curRun = doc.runs.find((r) => r.run_id === doc.ui?.run) ?? baseReal;
+    curRun = doc.runs[doc.runs.length - 1] ?? null;
   }
   /* attach a generic, editable plan the first time a run exists (never the
    * author's numbers; derived from the run's own chalk values). */
@@ -1896,7 +1923,7 @@ function openModal(pid) {
           <button class="ghost" id="callclear" title="clear this call and revert to the model's value">Reset to $${base}</button>
           <button class="primary" id="callsave">Set to $${base + cd}</button>
         </div>
-        <div class="chint">Fine tune your value with a fading/boosting override. It is kept in a separate "blend + My Calls" run, so the base blend is never touched.</div></div>`
+        <div class="chint">Fine tune your value with a fading/boosting override. It is a layer you can switch on or off in the values-from menu, so the base numbers are never touched.</div></div>`
     : "";
   const fav = isFav(pid);
   $("#modal").innerHTML = `<div class="mhead"><div class="mhl">
@@ -2023,6 +2050,53 @@ function openPlanEditor() {
 
 /* ---------------- the room shell ---------------- */
 
+/* ---------------- the mixer (V56, ported from levi-sheet V73) ----------------
+ * The chip reads like a select (a mono summary + caret); the menu is the gear
+ * menu's rows and switches: one per source, then "+ My Calls" as a layer. */
+const SRC_LABEL = { sleeper: "sleeper", fantasypros: "fpros", espn: "espn", cbs: "cbs" };
+function renderMixer() {
+  const btn = $("#mixbtn"); if (!btn || !curRun) return;
+  const all = Object.keys(doc.sources);
+  const mx = mixState();
+  const on = new Set(mx.on);
+  const isAll = all.every((s) => on.has(s));
+  const base = (curRun.run_id === "calls") ? buildRun(mx.on) : curRun;
+  const runNo = base ? `#${base.run_id}` : "";
+  $("#mixsum").innerHTML = (isAll && all.length > 1 ? "blend" : all.filter((s) => on.has(s)).map((s) => SRC_LABEL[s] || s).join(" + "))
+    + (mx.calls ? `<span class="calls"> + calls</span>` : "")
+    + `<span class="n">${runNo}</span>`;
+  $("#mixsrc").innerHTML = all.map((s) =>
+    `<button class="gtoggle${on.has(s) ? " on" : ""}" data-src="${s}" title="${on.has(s) ? "in the average - switch off to drop" : "not in the average - switch on to add"}"><span>${SRC_LABEL[s] || s}</span><span class="sw"><span class="knob"></span></span></button>`).join("");
+  const hasCalls = (doc.calls || []).length > 0;
+  $("#mixcalls").classList.toggle("on", mx.calls);
+  $("#mixcalls").disabled = !hasCalls;
+  $("#mixcalls").title = hasCalls ? "your My Calls overrides, applied on top of the average"
+    : "no calls yet - single-click a player and set one";
+  $("#mixrun").textContent = runNo;
+  const menu = $("#mixmenu");
+  btn.onclick = (ev) => { ev.stopPropagation(); menu.hidden = !menu.hidden; $("#gearmenu").hidden = true; };
+  document.addEventListener("click", (ev) => {
+    if (!menu.hidden && !menu.contains(ev.target) && ev.target !== btn && !btn.contains(ev.target)) menu.hidden = true;
+  }, { once: true });
+  $("#mixsrc").querySelectorAll(".gtoggle").forEach((b) => b.onclick = async (ev) => {
+    ev.stopPropagation();
+    const next = new Set(mixState().on);
+    if (next.has(b.dataset.src)) {
+      if (next.size === 1) { stampShow("KEEP ONE", "at least one source stays in the average"); return; }
+      next.delete(b.dataset.src);
+    } else next.add(b.dataset.src);
+    doc.ui.mix = { ...(doc.ui.mix || {}), sources: [...next] };
+    await saveDoc(doc); refreshRoom(); $("#mixmenu").hidden = false;
+  });
+  $("#mixcalls").onclick = async (ev) => {
+    ev.stopPropagation();
+    if (!hasCalls) return;
+    doc.ui.mix = { ...(doc.ui.mix || {}), calls: !mx.calls };
+    await saveDoc(doc); refreshRoom(); $("#mixmenu").hidden = false;
+  };
+  $("#mixadd").onclick = (ev) => { ev.stopPropagation(); menu.hidden = true; importState = { target: "my" }; renderImport(); };
+}
+
 function renderBoardScreen() {
   const root = $("#main");
   root.innerHTML = "";
@@ -2033,7 +2107,17 @@ function renderBoardScreen() {
    * left, inflation centered, flow strip on the right (built with the rail) */
   const hl = $("#hleft"), hc = $("#hcenter");
   hl.innerHTML = curRun ? `
-    <div class="chip"><span class="lab">values from</span><select id="runsel" title="which run all board values come from; add a new source at the bottom of the list"></select></div>
+    <div class="chip mixchip"><span class="lab">values from</span><button id="mixbtn" title="which projection sources are averaged into every number on the board, plus My Calls as a layer. Click to change."><span id="mixsum">-</span><span class="caret">&#9662;</span></button>
+      <div id="mixmenu" class="gearmenu mixmenu" hidden>
+        <div class="glab">sources in the average</div>
+        <div id="mixsrc"></div>
+        <div class="gdiv"></div>
+        <div class="glab">layer</div>
+        <button class="gtoggle" id="mixcalls" title="your My Calls overrides, applied on top of the average"><span>+ My Calls</span><span class="sw"><span class="knob"></span></span></button>
+        <div class="gdiv"></div>
+        <button id="mixadd">Add a source...</button>
+        <div class="gfoot"><span id="mixrun"></span><span>every mix is a saved run</span></div>
+      </div></div>
     <div class="chip" id="lastchip"></div>` : "";
   hc.innerHTML = curRun ? `<div class="chip" id="infl"></div>` : "";
   const hf = $("#flow"); if (hf) hf.innerHTML = "";
@@ -2094,20 +2178,7 @@ function renderBoardScreen() {
   layout.appendChild(rail);
   root.appendChild(layout);
 
-  const runsel = $("#runsel");
-  runsel.innerHTML = doc.runs.map((r) =>
-    `<option value="${r.run_id}">${r.source_label} (#${r.run_id})</option>`)
-    .join("")
-    + ((doc.calls || []).length
-      ? `<option value="calls">blend + My Calls</option>` : "")
-    + `<option disabled>--------</option><option value="__add">Add New...</option>`;
-  runsel.value = String(curRun.run_id);
-  runsel.onchange = async () => {
-    const v = runsel.value;
-    if (v === "__add") { importState = { target: "my" }; renderImport(); return; }
-    doc.ui.run = v === "calls" ? "calls" : parseInt(v, 10);
-    await saveDoc(doc); refreshRoom();
-  };
+  renderMixer();
   document.querySelectorAll(".btab").forEach((b) => {
     b.onclick = () => {
       boardTab = b.dataset.tab; localStorage.setItem("ls-tab", boardTab);
@@ -2256,7 +2327,8 @@ function helpValue() {
   ${hstep(1, "Your projections set the baseline.",
     `<p>One click pulls Sleeper's public projections; paste or import more
      (FantasyPros, CBS, any rankings list). With more than one source the board
-     averages them into a <b>blend</b>.</p>
+     averages them into a <b>blend</b>; the <b>values from</b> menu lets you switch
+     any source in or out of that average and the board recomputes.</p>
      <p><b>What is Bid$?</b> Yahoo or ESPN values get imported as <b>Mkt$</b> and
      rescaled as <b>Bid$</b> according to your league's budget and roster.
      <b>+/-</b> shows where you might get a deal.</p>`,
@@ -2305,8 +2377,9 @@ function helpValue() {
      if one player is priced high, someone else is priced low.</p>`)}
   ${hstep("+", "My Calls.",
     `<p>Your own dollar override on a player, for when you have a hunch. Adjust
-     by single clicking on the player. Calls live in a separate <b>blend + My
-     Calls</b> run, so the base numbers are never touched.</p>`,
+     by single clicking on the player. Calls are a <b>layer</b> you switch on in
+     the <b>values from</b> menu, applied on top of whatever sources you have lit,
+     so the base numbers are never touched.</p>`,
     `<div class="hmc"><b>MY CALL</b>
      <div class="callset"><button class="cstep">-</button><div class="cval"><span class="cd">$</span><span class="hcv">61</span></div><button class="cstep">+</button></div>
      <div class="callbtns"><button class="ghost">Reset to 58</button><button class="primary">Set to 61</button></div></div>`)}
@@ -2396,7 +2469,7 @@ function openHelp(tab = "r") {
       doc.ui.availFade = doc.ui.availFade === false;   // flip
       await saveDoc(doc);
       if (Object.keys(doc.sources).length) {
-        await makeRun(); doc.ui.run = null; await saveDoc(doc);
+        await makeRun(); await saveDoc(doc);
         renderBoardScreen();
       }
       $("#mtabc").innerHTML = helpValue(); wire();
