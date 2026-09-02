@@ -4,7 +4,7 @@
  * own Sleeper/import fetches, and any self-host copilot server) goes to the
  * network and is never cached. */
 
-const CACHE = "liquid-sheets-v58";
+const CACHE = "liquid-sheets-v59";
 /* copilot.js is deliberately NOT precached: the hosted build (config.AI_ENDPOINT
  * null) never imports it, so shipping it in the shell would cache an AI module
  * the app never runs. A self-hoster who sets AI_ENDPOINT gets it via the runtime
@@ -24,9 +24,15 @@ const SHELL = [
   "/engine/engine.js",
 ];
 
+/* Precache with cache:"reload" so a version bump always fetches the shell
+ * fresh from the network. The CDN serves these files with max-age=14400, and
+ * a plain c.add(u) honors the HTTP cache: a stale 4-hour-old app.js could be
+ * copied into the NEW cache and served cache-first until the next bump. That
+ * is how one user stayed on old code across refreshes (V59 fix). */
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE)
-    .then((c) => Promise.allSettled(SHELL.map((u) => c.add(u))))
+    .then((c) => Promise.allSettled(SHELL.map((u) =>
+      c.add(new Request(u, { cache: "reload" })))))
     .then(() => self.skipWaiting()));
 });
 

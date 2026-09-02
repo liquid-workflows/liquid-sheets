@@ -1083,12 +1083,13 @@ function buildModel() {
     doc.league.plan = defaultPlan(curRun.players, slotOrder(),
       doc.league.budget);
     saveDoc(doc);
-  } else if (curRun && doc.league && doc.league.plan
-    && doc.league.plan.variant === "default") {
+  } else if (curRun && doc.league && doc.league.plan) {
     /* one-time repair (V58): the pre-V58 seed stored the chalk players' raw
      * values, which add to far more than any budget and read as impossible
      * numbers in the editor. Starters over 1.5x the budget can only be that
-     * old seed, never a plan a person set, so re-seed (keeping variants). */
+     * old seed, never a plan a person set, so re-seed (keeping variants).
+     * Deliberately not gated on the variant name: any plan that impossible
+     * is the old seed, whatever it is called. */
     const env = doc.league.plan.envelopes || {};
     const starters = Object.keys(env).filter((k) => !["K", "DEF", "BN"].includes(k))
       .reduce((a, k) => a + (env[k] || 0), 0);
