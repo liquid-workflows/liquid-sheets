@@ -1263,7 +1263,7 @@ function skillCol(pos) {
   col.innerHTML =
     `<div class="colhead"><div class="t1"><span class="${posClass(pos)}" title="Position column. Values are computed against replacement baseline ${pos}${base}: the best player assumed freely available.">${pos}</span><button class="colbtn" title="collapse this column to a slim strip">&#171;</button></div>
      <div class="t2 grid-skill"><span title="tier: players whose values sit within noise of each other. A tier ends once value has fallen 20% below that tier's own top - one rule that catches both hard cliffs and slow slides. The horizontal rule marks each break.">T</span><span>player</span>
-       <span class="pts" title="estimated bid the room pays: your market source's average salary, rescaled to your league's money supply. Blank until you add market values.">Bid$</span>
+       <span class="pts sortable${sortBy === "bid" ? " on" : ""}" data-sort="bid" title="estimated bid the room pays: your market source's average salary, rescaled to your league's money supply. Blank until you add market values. CLICK to sort by bid.">Bid$</span>
        <span class="edge sortable${sortBy === "deal" ? " on" : ""}" data-sort="deal" title="my$ minus bid$. GREEN (+) a deal: worth more to me than the room pays. RED (-) the room pays past my value. Blank without market values. CLICK to sort by deal.">+/-</span>
        <span class="r sortable${sortBy === "usd" ? " on" : ""}" data-sort="usd" title="my auction value for this league: the most you should be willing to pay. CLICK to sort by value.">My$</span></div></div>`;
   col.querySelector(".colbtn").onclick = (e) => {
@@ -1280,12 +1280,16 @@ function skillCol(pos) {
     group = [...group].sort((a, b) =>
       ((dealOf(b) ?? -999) - (dealOf(a) ?? -999)));
   }
+  if (sortBy === "bid") {                 // bid = my$ minus the deal, so no market field needed
+    const bid = (p) => (dealOf(p) == null ? -1 : p.usd - dealOf(p));
+    group = [...group].sort((a, b) => bid(b) - bid(a));
+  }
   const above = group.filter((p) => (p.usd || 0) >= 2);
   const free = group.filter((p) => (p.usd || 0) < 2);
   let lastTier = null;
   const rowWithTier = (p, target) => {
     addRow(p, target, false);
-    if (sortBy !== "deal" && p.tier !== lastTier && lastTier !== null) {
+    if (sortBy !== "deal" && sortBy !== "bid" && p.tier !== lastTier && lastTier !== null) {
       target.lastChild.classList.add("t-open");
     }
     lastTier = p.tier;
@@ -2066,7 +2070,7 @@ function renderMixer() {
     + (mx.calls ? `<span class="calls"> + calls</span>` : "")
     + `<span class="n">${runNo}</span>`;
   $("#mixsrc").innerHTML = all.map((s) =>
-    `<button class="gtoggle${on.has(s) ? " on" : ""}" data-src="${s}" title="${on.has(s) ? "in the average - switch off to drop" : "not in the average - switch on to add"}"><span>${SRC_LABEL[s] || s}</span><span class="sw"><span class="knob"></span></span></button>`).join("");
+    `<button class="gtoggle${on.has(s) ? " on" : ""}" data-src="${s}"><span>${SRC_LABEL[s] || s}</span><span class="sw"><span class="knob"></span></span></button>`).join("");
   const hasCalls = (doc.calls || []).length > 0;
   $("#mixcalls").classList.toggle("on", mx.calls);
   $("#mixcalls").disabled = !hasCalls;
