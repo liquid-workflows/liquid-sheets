@@ -146,7 +146,7 @@ export function planFit(p, ps) {
  * starter slot is seeded with the model dollar value of the chalk player who
  * would fill it ("draft the board at value"). Users reshape it into whatever
  * stars-and-scrubs curve they want; the water-fill and ceilings do the rest. */
-export function defaultEnvelopes(runPlayers, slotLabels) {
+export function defaultEnvelopes(runPlayers, slotLabels, starterPool = null) {
   const keys = planKeys(slotLabels);
   const byPos = {};
   ["QB", "RB", "WR", "TE"].forEach((P) => {
@@ -171,15 +171,43 @@ export function defaultEnvelopes(runPlayers, slotLabels) {
       used[lab]++;
     }
   });
+  /* Normalize the starter shape to the money actually available for
+   * starters (budget less the reserve). The chalk players' raw values add to
+   * far more than any budget (you cannot afford the #1 player at every slot),
+   * so left unscaled the template reads as impossible dollars in the editor
+   * while the roster sidebar shows the water-filled version. Scaling here
+   * keeps the stars-and-scrubs ratios and makes "what you plan to spend per
+   * starting slot" literally true. The water-fill still flexes it live. */
+  if (starterPool != null) {
+    const sKeys = slotLabels.map((l, i) => (isStarter(l) ? keys[i] : null))
+      .filter(Boolean);
+    const sum = sKeys.reduce((a, k) => a + env[k], 0);
+    if (sum > 0) {
+      const target = Math.max(starterPool, sKeys.length);
+      const raw = sKeys.map((k) => env[k] * (target / sum));
+      const out = raw.map((v) => Math.max(1, Math.floor(v)));
+      /* hand the rounding remainder to the slots with the largest fractional
+       * parts so the starters add to the pool exactly, never a dollar over */
+      let left = target - out.reduce((a, v) => a + v, 0);
+      const order = raw.map((v, i) => [v - Math.floor(v), i])
+        .sort((a, b) => b[0] - a[0]).map((x) => x[1]);
+      for (let j = 0; left > 0 && j < order.length; j++, left--) out[order[j]]++;
+      sKeys.forEach((k, i) => { env[k] = out[i]; });
+    }
+  }
   return env;
 }
 
 export function defaultPlan(runPlayers, slotLabels, budget) {
+  const float_target = [Math.max(1, Math.round(budget * 0.02)),
+    Math.max(2, Math.round(budget * 0.05))];
+  /* the reserve the water-fill will hold; mirrors myPlanState's purseTarget
+   * so the seeded starters plus the reserve add up to the budget */
+  const purse = Math.round((float_target[0] + float_target[1]) / 2) + 6;
   return {
     variant: "default",
-    float_target: [Math.max(1, Math.round(budget * 0.02)),
-      Math.max(2, Math.round(budget * 0.05))],
+    float_target,
     purse: null,
-    envelopes: defaultEnvelopes(runPlayers, slotLabels),
+    envelopes: defaultEnvelopes(runPlayers, slotLabels, budget - purse),
   };
 }

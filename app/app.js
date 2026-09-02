@@ -1083,6 +1083,20 @@ function buildModel() {
     doc.league.plan = defaultPlan(curRun.players, slotOrder(),
       doc.league.budget);
     saveDoc(doc);
+  } else if (curRun && doc.league && doc.league.plan
+    && doc.league.plan.variant === "default") {
+    /* one-time repair (V58): the pre-V58 seed stored the chalk players' raw
+     * values, which add to far more than any budget and read as impossible
+     * numbers in the editor. Starters over 1.5x the budget can only be that
+     * old seed, never a plan a person set, so re-seed (keeping variants). */
+    const env = doc.league.plan.envelopes || {};
+    const starters = Object.keys(env).filter((k) => !["K", "DEF", "BN"].includes(k))
+      .reduce((a, k) => a + (env[k] || 0), 0);
+    if (starters > doc.league.budget * 1.5) {
+      doc.league.plan = { ...defaultPlan(curRun.players, slotOrder(),
+        doc.league.budget), variants: doc.league.plan.variants || {} };
+      saveDoc(doc);
+    }
   }
   curSales = activeSales(doc.journal);
   soldSet = new Set(curSales.map((s) => s.pid));
@@ -2009,6 +2023,7 @@ function openPlanEditor() {
     ${varOpts ? `<div class="field"><span>Load a saved variant</span><select id="pvar"><option value="">(pick one)</option>${varOpts}</select></div>` : ""}
     <div class="field"><span>Reserve held for bench + K + DEF</span><input id="ppurse" type="number" min="0" step="1" value="${purseVal}" style="width:80px;text-align:right"></div>
     <table id="mtable">${rows}</table>
+    <div id="ptotal" class="sub" style="margin-top:8px"></div>
     <div class="wiznav" style="margin-top:14px;gap:8px;flex-wrap:wrap">
       <button class="ghost tiny" id="planDefault">reset to value default</button>
       <button class="ghost tiny" id="planSaveAs">save as variant...</button>
@@ -2022,6 +2037,23 @@ function openPlanEditor() {
     const pv = parseInt($("#ppurse").value, 10);
     plan.purse = Number.isFinite(pv) ? pv : null;
   };
+  /* live total: the envelopes are real dollars, so show them adding up
+   * (or not) against the budget as the user edits */
+  const updTotal = () => {
+    let st = 0;
+    document.querySelectorAll(".penv").forEach((inp) => {
+      st += Math.max(1, parseInt(inp.value, 10) || 1);
+    });
+    const pv = parseInt($("#ppurse").value, 10) || 0;
+    const tot = st + pv, b = doc.league.budget;
+    const t = $("#ptotal");
+    t.textContent = `starters $${st} + reserve $${pv} = $${tot} of your $${b} budget`
+      + (tot > b ? ` (over by $${tot - b})` : tot < b ? ` ($${b - tot} unassigned)` : "");
+    t.style.color = tot > b ? "var(--bad)" : "var(--muted)";
+  };
+  document.querySelectorAll(".penv").forEach((inp) => { inp.oninput = updTotal; });
+  $("#ppurse").oninput = updTotal;
+  updTotal();
   $("#planSave").onclick = async () => {
     readInputs(); await saveDoc(doc); closeModal(); refreshRoom();
   };
