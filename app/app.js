@@ -2170,7 +2170,7 @@ function openPlanEditor() {
   const varOpts = Object.keys(plan.variants).map((v) =>
     `<option value="${v}">${v}</option>`).join("");
   $("#modal").innerHTML = `<h3>Budget plan</h3>
-    <div class="sub">stars-and-scrubs envelopes: what you plan to spend per starting slot. These shape The Call's plan-fit and your roster projections; they never touch the value math. The live water-fill flexes them as the draft unfolds.</div>
+    <div class="sub">stars-and-scrubs envelopes: what you plan to spend per starting slot. These shape The Call's plan-fit and your roster projections; they never touch the value math. As you spend they flex to your remaining money in proportion to their size: bank a deal and the others grow, overpay and they shrink, and what the starters cannot absorb rolls into the reserve.</div>
     ${varOpts ? `<div class="field"><span>Load a saved variant</span><select id="pvar"><option value="">(pick one)</option>${varOpts}</select></div>` : ""}
     <div class="field"><span>Reserve held for bench + K + DEF</span><input id="ppurse" type="number" min="0" step="1" value="${purseVal}" style="width:80px;text-align:right"></div>
     <table id="mtable">${rows}</table>
@@ -2603,9 +2603,8 @@ function helpRoom() {
   ${hstep(4, "Your Budget Plan.",
     `<p>Target spend per starting slot, set under ${GEAR} <i>Budget plan</i>. As
      you spend, they water-fill to your remaining money: bank a deal and the
-     others grow, overpay and they shrink. Each target also re-calcs as players
-     come off the board, so it can never be higher than the most expensive
-     player still available at that position.</p>`,
+     others grow, overpay and they shrink. It will never be higher than the
+     most expensive player still available at that position.</p>`,
     `<div class="cslots"><div class="srow"><span class="lab pRB">RB1</span><span class="pl pRB">~$58</span></div>
      <div class="srow"><span class="lab pWR">WR1</span><span class="pl pWR">~$44</span></div>
      <div class="srow"><span class="lab pFLX">FLEX</span><span class="pl pFLX">~$19</span></div></div>`)}

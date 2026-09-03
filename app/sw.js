@@ -4,7 +4,7 @@
  * own Sleeper/import fetches, and any self-host copilot server) goes to the
  * network and is never cached. */
 
-const CACHE = "liquid-sheets-v62";
+const CACHE = "liquid-sheets-v63";
 /* copilot.js is deliberately NOT precached: the hosted build (config.AI_ENDPOINT
  * null) never imports it, so shipping it in the shell would cache an AI module
  * the app never runs. A self-hoster who sets AI_ENDPOINT gets it via the runtime
