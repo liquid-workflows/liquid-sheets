@@ -234,3 +234,16 @@ picker, link it to the platform). Two things surfaced while doing it: the
 Platform setting from the spec's wizard step 1 had never been built (every
 league was silently "yahoo"), and the ESPN auction-variant check read the
 wrong scoring path and always chose STANDARD. Both fixed. ADR-0013.
+
+### League settings save no longer resets the budget plan (2026-09-03)
+
+Found while answering "can an existing league just switch its Platform to
+ESPN, or must it be recreated?" (it can just switch). finishWizard rebuilt
+doc.league as a fresh object with no plan field, so every League-settings
+save (a rename, a team reorder, a platform change) dropped the budget plan
+and the auto-seed silently reset it to the default, wiping envelope edits
+and saved variants. Pre-existing since the editor was built. Fix: when
+editing, the existing plan is carried forward as long as the roster shape is
+unchanged (envelopes are roster-shaped; a changed roster re-seeds from the
+run). Verified through the real UI path: platform switched to ESPN, plan
+edit kept, journal and markets intact. V62.

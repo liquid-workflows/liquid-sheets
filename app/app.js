@@ -581,6 +581,15 @@ async function finishWizard() {
   if (!doc) doc = newDoc();
   pendingNewFrom = null;      // a finished wizard is a real league now
   const w = wizardState;
+  /* Editing an existing league keeps its budget plan (envelope edits, saved
+   * variants) as long as the roster shape is unchanged. The envelopes are
+   * roster-shaped, so a changed roster re-seeds from the run instead. Before
+   * this, any League-settings save (a rename, a platform change) dropped the
+   * plan and the auto-seed silently reset it to the default (V62 fix). */
+  const prev = doc.league;
+  const sameRoster = !!prev
+    && JSON.stringify(prev.full_roster) === JSON.stringify(w.roster);
+  const keepPlan = (w.editing && prev && prev.plan && sameRoster) ? prev.plan : null;
   doc.league = {
     name: w.name.trim() || `${w.teams}-team league`,
     platform: w.platform, season: PRIOR_SEASON,
@@ -597,6 +606,7 @@ async function finishWizard() {
     team_names: [...w.teamNames],
     me: w.me ?? 0,
   };
+  if (keepPlan) doc.league.plan = keepPlan;
   await saveDoc(doc);
 }
 
