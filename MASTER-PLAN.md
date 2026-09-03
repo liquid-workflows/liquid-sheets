@@ -207,3 +207,19 @@ Appended at each phase exit.
 - `mock-draft-1-3.json` sits in the repo root but is GITIGNORED (embeds Sleeper projections, must not be committed per constraint #1). It is a ~1/3-through 12-team auction backup Levi imports to explore a mid-draft board.
 
 **Do not modify:** `../levi-sheet/` is the private predecessor and Levi's personal tool, and the home of the raw availability data. The public repo is self-contained; raw licensed data stays gitignored (golden master and `verify/prior/` follow "public method, private data").
+
+### ESPN one-click import (2026-09-03)
+
+An ESPN-league user could not get ESPN data in. Two findings. First, the ESPN
+paste parser was never built: only a Yahoo pre-parser exists, and "ESPN" in
+the import UI was a label on the generic mapper. Second, the assumption behind
+the spec's paste-only ESPN posture was wrong: ESPN's `lm-api-reads` kona
+endpoint serves the default-league pool unauthenticated, reflects any origin
+in `access-control-allow-origin`, and passes the CORS preflight for the
+`x-fantasy-filter` header. So ESPN can be a one-click fetch like Sleeper.
+Built as `app/espn.js` (ports `levi-sheet/ingest/pull_espn.py`), a chooser
+that honors ADR-0009 (values -> Bid$, projections -> My$ source "espn"), name
+matching onto the Sleeper-established board with unmatched names reported.
+Amends DATA-IN-SPEC (recorded there and in ADR-0012). Lesson: verify CORS with
+a real preflight before ruling an API out; the paste preset stays on the
+roadmap as the fallback and needs a real ESPN paste sample to build.

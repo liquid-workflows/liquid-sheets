@@ -17,6 +17,7 @@ The private predecessor's ADRs are not copied here, but the practice is inherite
 | [ADR-0009](./0009-my-dollar-and-bid-dollar-are-separate-inputs.md) | My$ and Bid$ are separate inputs; market values never enter the My$ blend | Accepted | 2026-08-30 |
 | [ADR-0010](./0010-roster-aware-verdict-scarcity.md) | The verdict is roster-aware: position scarcity does not force LAST CHANCE for a slot you no longer need | Accepted | 2026-09-01 |
 | [ADR-0011](./0011-verdict-carries-no-hardcoded-strategy.md) | The verdict carries no hardcoded strategy: K/DEF spend is set by the budget plan | Accepted | 2026-09-01 |
+| [ADR-0012](./0012-one-click-espn-import.md) | One-click ESPN import in the hosted app: ESPN's public API sends CORS | Accepted | 2026-09-03 |
 
 ## Status Legend
 

@@ -14,6 +14,7 @@ import { loadDoc, saveDoc, wipeDoc, newDoc, exportDoc, importDocFile,
   linkedFileName, saveToFile, listLeagues, setActive, deleteLeague }
   from "./storage.js";
 import { fetchSleeper } from "./sleeper.js";
+import { fetchEspn } from "./espn.js";
 import { myPlanState, planFit, defaultPlan } from "./plan.js";
 import { AI_ENABLED, AI_ENDPOINT } from "./config.js";
 
@@ -531,10 +532,19 @@ function stepData(body, nav) {
 function stepMarket(body, nav) {
   body.appendChild(el("h2", null, "Market values (Bid$)"));
   body.appendChild(el("p", "hint",
-    "Import today's Yahoo or ESPN auction values. They are rescaled to your " +
-    "league's money as Bid$. Bid$ is the estimate of what your room will pay."));
+    "Add today's auction values. They are rescaled to your league's money " +
+    "as Bid$, the estimate of what your room will pay. ESPN is one click; " +
+    "Yahoo (or any values page) is a paste."));
   const cards = el("div", "optcards");
-  const imp = el("button", "optcard primary");
+  const espn = el("button", "optcard primary");
+  espn.innerHTML = `<b>Fetch ESPN values</b><small>One click: ESPN's public auction values as Bid$, plus its projections if you want them.</small>`;
+  espn.onclick = async () => {
+    await finishWizard();
+    wizardState.resumeAt = null;
+    renderBoardScreen();
+    openEspnImport();
+  };
+  const imp = el("button", "optcard");
   imp.innerHTML = `<b>Import Yahoo or ESPN values</b><small>Copy the values page or upload the CSV; you confirm the column mapping.</small>`;
   imp.onclick = async () => {
     await finishWizard();
@@ -542,7 +552,7 @@ function stepMarket(body, nav) {
     importState = { target: "market", kind: "values" };
     renderImport();
   };
-  cards.appendChild(imp);
+  cards.appendChild(espn); cards.appendChild(imp);
   body.appendChild(cards);
   navButtons(nav, {
     next: "Skip for now",
@@ -590,6 +600,95 @@ async function doFetchSleeper() {
   Object.assign(doc.names, names);
   Object.assign(doc.player_meta, meta);
   await makeRun();
+}
+
+/* One-click ESPN (ADR-0012): the same shape as doFetchSleeper, except ESPN
+ * rows carry no pid, so they match the board by name (matchEntries) and the
+ * unmatched are reported, never dropped. It needs a board first: the player
+ * pool comes from Sleeper (or an import); ESPN adds Bid$ and a source to it.
+ * Per ADR-0009 the caller says which target(s): values -> Bid$, projections
+ * -> the My$ blend as source "espn". */
+function espnVariant() {
+  const ppr = Object.values(doc.league.scoring?.ppr_by_pos ?? {})
+    .some((v) => v > 0);
+  return ppr ? "PPR" : "STANDARD";
+}
+async function doFetchEspn({ values = true, projections = true } = {}) {
+  const roster = boardRoster();
+  if (!roster.length) {
+    throw new Error("fetch Sleeper projections first; ESPN adds to that board");
+  }
+  const variant = espnVariant();
+  const { as_of, entries } = await fetchEspn(doc.league.season, variant);
+  if (!entries.length) {
+    throw new Error("ESPN returned no players right now. Try again in a moment, or paste the values page");
+  }
+  const { matched, unmatched } = matchEntries(entries, roster);
+  const posOf = new Map(roster.map((r) => [r.pid, r.pos]));
+  let nVal = 0, nProj = 0;
+  if (values) {
+    const vals = {};
+    for (const m of matched) {
+      /* $0 is ESPN's "undrafted"; leave those unpriced (honest absence) */
+      if (m.entry.value != null && m.entry.value > 0) {
+        vals[m.pid] = m.entry.value; nVal++;
+      }
+    }
+    doc.market = { label: "espn", as_of, values: vals };
+  }
+  if (projections) {
+    const players = matched.filter((m) => m.entry.stats && posOf.get(m.pid))
+      .map((m) => ({ player_id: m.pid, pos: posOf.get(m.pid), team: null,
+        stats: m.entry.stats }));
+    nProj = players.length;
+    doc.sources.espn = { as_of, players };
+    await makeRun();
+  }
+  await saveDoc(doc);
+  return { variant, nVal, nProj,
+    unmatched: unmatched.map((e) => `${e.name} (${e.pos})`) };
+}
+
+/* the ESPN chooser: the user picks the target(s) up front (ADR-0009), the
+ * fetch runs, and the result (counts plus every unmatched name) is shown
+ * before the modal closes. */
+function openEspnImport() {
+  if (!doc || !doc.league) { alert("Finish setup first."); return; }
+  const variant = espnVariant();
+  $("#modal").innerHTML = `<h3>Import ESPN</h3>
+    <div class="sub">One fetch from ESPN's public player pool. Pick what it feeds; the two never mix. Values are ESPN's default-league ${variant === "PPR" ? "PPR" : "standard"} auction values, rescaled to your league's money as Bid$.</div>
+    <div class="field"><span>Auction values, as Bid$ (lights up the +/- deal column)</span><input id="espnVals" type="checkbox" checked></div>
+    <div class="field"><span>Season projections, as a My$ source named espn</span><input id="espnProj" type="checkbox"></div>
+    <p class="hint">Projections are opt-in: ESPN prices its own projections, so feeding both makes Bid$ and My$ share an input and softens the +/- deal signal. Turn it on for a stronger blend if you accept that.</p>
+    <p class="msg" id="espnMsg"></p>
+    <div class="wiznav" style="margin-top:14px;gap:8px;flex-wrap:wrap">
+      <button class="ghost tiny" id="espnCancel">cancel</button>
+      <button class="primary" id="espnGo">Fetch from ESPN</button>
+    </div>`;
+  $("#ovl").style.display = "flex";
+  $("#espnCancel").onclick = closeModal;
+  $("#espnGo").onclick = async () => {
+    const values = $("#espnVals").checked, projections = $("#espnProj").checked;
+    if (!values && !projections) { $("#espnMsg").textContent = "Pick at least one."; return; }
+    const go = $("#espnGo"); go.disabled = true; go.textContent = "Fetching...";
+    try {
+      const r = await doFetchEspn({ values, projections });
+      renderBoardScreen();   /* the board underneath updates now */
+      const parts = [];
+      if (values) parts.push(`${r.nVal} players priced as Bid$`);
+      if (projections) parts.push(`${r.nProj} projections joined My$ as "espn"`);
+      const un = r.unmatched;
+      $("#modal").innerHTML = `<h3>ESPN imported</h3>
+        <div class="sub">${parts.join("; ")} (${r.variant} values).</div>
+        ${un.length ? `<p class="hint">${un.length} ESPN player${un.length === 1 ? "" : "s"} did not match a name on your board and were skipped (never silently): ${un.slice(0, 20).join(", ")}${un.length > 20 ? ", ..." : ""}</p>` : `<p class="hint">Every ESPN player matched your board.</p>`}
+        <div class="wiznav" style="margin-top:14px"><button class="primary" id="espnDone">Done</button></div>`;
+      $("#espnDone").onclick = closeModal;
+      stampShow("ESPN", parts[0]);
+    } catch (e) {
+      $("#espnMsg").textContent = `Fetch failed (${e.message}). If ESPN is blocking the request or you are offline, copy ESPN's values page and paste it under Import instead.`;
+      go.disabled = false; go.textContent = "Fetch from ESPN";
+    }
+  };
 }
 
 /* Build (synchronously) a run from a chosen subset of sources - the mixer (V56).
@@ -2681,6 +2780,7 @@ async function boot() {
     try { await doFetchSleeper(); renderBoardScreen(); }
     catch (e) { alert(`Fetch failed (${e.message}). Are you offline?`); }
   };
+  $("#menuEspn").onclick = () => { menu.hidden = true; openEspnImport(); };
   $("#ovl").onclick = (e) => { if (e.target.id === "ovl") closeModal(); };
 
   /* AI live read: wired ONLY when a self-hoster set config.AI_ENDPOINT. The

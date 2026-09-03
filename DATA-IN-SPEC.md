@@ -20,7 +20,7 @@ One click yields: raw stat-line projections for QB/RB/WR/TE (the engine scores t
 The user copies their platform's player list (which shows auction values) and pastes into the app. This feeds the deal column and the opponent-anchor logic.
 
 * **Yahoo**: the predecessor's parser (`levi-sheet/ingest/load_manual.py`) already survives Yahoo's two paste layouts by anchoring on the `%Drafted` field in 7-line records. That anchor strategy ports as a preset.
-* **ESPN**: the league-aware projections page (`fantasy.espn.com/football/players/projections?leagueId=...`) displays auction values; no native CSV export exists, so paste is the path here too. An ESPN preset gets built from real 2026 page samples (build-time task, Phase 4).
+* **ESPN**: AMENDED 2026-09-03 by [ADR-0012](docs/adr/0012-one-click-espn-import.md). ESPN's public read API turned out to send CORS headers (preflight included), so the app now has a one-click "Import ESPN values" fetch, the same posture as Path A, feeding Bid$ and/or a My$ source at the user's choice. Paste remains the fallback for when that unofficial API changes; the ESPN paste preset is still to be built from a real 2026 page sample.
 
 ### Path C: Generic CSV import (the universal door)
 
@@ -73,7 +73,7 @@ Everything else the engine needs has a sensible default and lives behind "advanc
 | nflverse | Not direct | Availability-prior aggregate (openly licensed data; ship with attribution) | Yes: prior-builder script |
 | FFC ADP | Not direct | Inside the availability-prior aggregate (documented public API) | Yes: prior-builder script |
 | Yahoo | User pastes their own pages (personal use, client-side only) | Nothing | None needed: paste is the path |
-| ESPN | User pastes their own league page (personal use, client-side only) | Nothing | PROPOSED yes: the kona-endpoint script (years of public precedent: espn-api, ESPN_Extractor), framed personal-use |
+| ESPN | One-click fetch of the public default-league pool (unauthenticated API, permissive CORS, same precedent as Sleeper: espn-api, ESPN_Extractor); paste is the fallback. Amended by ADR-0012. | Nothing | Superseded by the in-app fetch |
 | FantasyPros | User's own CSV export via Path C | Nothing; no FP-derived samples ship | None: manual export is the path |
 | CBS | Generic CSV via Path C | Nothing | PROPOSED no: pure page-scraper, low value over Path C |
 
