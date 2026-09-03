@@ -71,7 +71,7 @@ const STEPS = ["League", "Roster", "Scoring", "Teams", "Projections", "Market"];
 
 function resetWizardState() {
   Object.assign(wizardState, {
-    step: 0, editing: false, name: "", teams: 12, budget: 200,
+    step: 0, editing: false, name: "", platform: "yahoo", teams: 12, budget: 200,
     roster: { QB: 1, RB: 2, WR: 3, TE: 1, FLEX: 1, K: 1, DEF: 1, BN: 5 },
     preset: "half", knobs: { ...DEFAULT_KNOBS }, teamNames: [],
     teamOrig: [], me: 0, resumeAt: null,
@@ -166,6 +166,7 @@ function openLeagueEditor() {
   const w = wizardState;
   w.editing = true; w.step = 0;
   w.name = L.name || "";
+  w.platform = L.platform || "yahoo";
   w.teams = L.teams; w.budget = L.budget;
   w.roster = { ...L.full_roster };
   w.teamNames = [...L.team_names];
@@ -291,6 +292,18 @@ function stepLeague(body, nav) {
   nameInp.oninput = () => { wizardState.name = nameInp.value; };
   nameWrap.appendChild(nameInp);
   body.appendChild(nameWrap);
+  /* Platform: the site your league drafts on. It drives Bid$: that
+   * platform's imported values are the market (Levi, 2026-09-03). */
+  const platWrap = el("label", "field");
+  platWrap.appendChild(el("span", null, "Platform (its values are your Bid$)"));
+  const platSel = el("select");
+  [["yahoo", "Yahoo"], ["espn", "ESPN"], ["other", "Other"]].forEach(([v, t]) => {
+    const o = el("option", null, t); o.value = v; platSel.appendChild(o);
+  });
+  platSel.value = wizardState.platform || "yahoo";
+  platSel.onchange = () => { wizardState.platform = platSel.value; };
+  platWrap.appendChild(platSel);
+  body.appendChild(platWrap);
   /* Team count is locked once sales exist: sales reference team slots, so
    * shrinking the league would orphan them. Everything else stays editable. */
   const salesExist = wizardState.editing && doc
@@ -609,7 +622,7 @@ async function doFetchSleeper() {
  * Per ADR-0009 the caller says which target(s): values -> Bid$, projections
  * -> the My$ blend as source "espn". */
 function espnVariant() {
-  const ppr = Object.values(doc.league.scoring?.ppr_by_pos ?? {})
+  const ppr = Object.values(doc.league.scoring?.rec?.ppr_by_pos ?? {})
     .some((v) => v > 0);
   return ppr ? "PPR" : "STANDARD";
 }
@@ -634,7 +647,8 @@ async function doFetchEspn({ values = true, projections = true } = {}) {
         vals[m.pid] = m.entry.value; nVal++;
       }
     }
-    doc.market = { label: "espn", as_of, values: vals };
+    doc.markets.espn = { label: "espn", as_of,
+      imported_at: new Date().toISOString(), values: vals };
   }
   if (projections) {
     const players = matched.filter((m) => m.entry.stats && posOf.get(m.pid))
@@ -645,7 +659,7 @@ async function doFetchEspn({ values = true, projections = true } = {}) {
     await makeRun();
   }
   await saveDoc(doc);
-  return { variant, nVal, nProj,
+  return { variant, nVal, nProj, active: activeMarket()?.label ?? null,
     unmatched: unmatched.map((e) => `${e.name} (${e.pos})`) };
 }
 
@@ -678,8 +692,10 @@ function openEspnImport() {
       if (values) parts.push(`${r.nVal} players priced as Bid$`);
       if (projections) parts.push(`${r.nProj} projections joined My$ as "espn"`);
       const un = r.unmatched;
+      const kept = values && r.active && r.active !== "espn"
+        ? `<p class="hint">Stored. Your league is set to ${r.active}, so Bid$ keeps using ${r.active} values; change Platform under League settings to switch to ESPN.</p>` : "";
       $("#modal").innerHTML = `<h3>ESPN imported</h3>
-        <div class="sub">${parts.join("; ")} (${r.variant} values).</div>
+        <div class="sub">${parts.join("; ")} (${r.variant} values).</div>${kept}
         ${un.length ? `<p class="hint">${un.length} ESPN player${un.length === 1 ? "" : "s"} did not match a name on your board and were skipped (never silently): ${un.slice(0, 20).join(", ")}${un.length > 20 ? ", ..." : ""}</p>` : `<p class="hint">Every ESPN player matched your board.</p>`}
         <div class="wiznav" style="margin-top:14px"><button class="primary" id="espnDone">Done</button></div>`;
       $("#espnDone").onclick = closeModal;
@@ -1021,7 +1037,8 @@ async function finishImport() {
     for (const m of matched) {
       if (m.entry.value != null) values[m.pid] = m.entry.value;
     }
-    doc.market = { label, as_of, values };
+    doc.markets[label] = { label, as_of,
+      imported_at: new Date().toISOString(), values };
   } else if (kind === "projections") {
     doc.sources[label] = {
       as_of,
@@ -1049,6 +1066,12 @@ async function finishImport() {
     await makeRun();
   }
   await saveDoc(doc);
+  if (kind === "values") {
+    const act = activeMarket()?.label;
+    if (act && act !== label) {
+      stampShow("STORED", `Bid$ uses ${act} (League settings > Platform)`);
+    }
+  }
   afterImport();
 }
 
@@ -1066,6 +1089,23 @@ let kdefView = localStorage.getItem("ls-kdef") || "DEF";
 let sortBy = localStorage.getItem("ls-sort") || "usd";
 let mScale = 1;
 let curRun = null, curSales = [];
+let curMarket = null;   /* the market driving Bid$ this render (activeMarket) */
+
+/* Bid$ follows the league's platform (Levi, 2026-09-03): the imported market
+ * whose label matches league.platform drives Bid$ and +/-; there is no
+ * picker. Every import is kept under its own label, so a second platform's
+ * values never overwrite the first. If the league's platform has no import
+ * yet, the most recently imported market stands in (named in the masthead)
+ * rather than leaving Bid$ blank. */
+function activeMarket() {
+  const ms = doc?.markets || {};
+  const list = Object.values(ms);
+  if (!list.length) return null;
+  const plat = doc.league?.platform;
+  if (plat && ms[plat]) return ms[plat];
+  return list.slice().sort((a, b) =>
+    (b.imported_at || b.as_of || "").localeCompare(a.imported_at || a.as_of || ""))[0];
+}
 /* any board column can collapse to a slim strip; persisted (ported) */
 let colMin = JSON.parse(localStorage.getItem("ls-colmin") || "{}");
 if (!("KDEF" in colMin)) colMin.KDEF = true;  // K/DEF collapsed until toggled
@@ -1201,7 +1241,8 @@ function buildModel() {
   curSales = activeSales(doc.journal);
   soldSet = new Set(curSales.map((s) => s.pid));
   soldBy = {}; curSales.forEach((s) => { soldBy[s.pid] = s; });
-  const mv = doc.market?.values ?? null;
+  curMarket = activeMarket();
+  const mv = curMarket?.values ?? null;
   P = [];
   if (curRun) {
     for (const p of curRun.players) {
@@ -1224,7 +1265,7 @@ function buildModel() {
   byId = {}; P.forEach((p) => { byId[p.id] = p; });
 }
 
-const dealOf = (p) => (doc.market && p.usd != null && p.y_avg != null)
+const dealOf = (p) => (curMarket && p.usd != null && p.y_avg != null)
   ? p.usd - p.y_avg * mScale : null;
 
 /* ledger states in the original's field names */
@@ -1574,7 +1615,7 @@ function renderChips() {
   if (sel) {
     const L = doc.league;
     sel.title = `${L.teams} teams x $${L.budget}` +
-      (doc.market ? `; market scale ${mScale.toFixed(2)}` : "") + ". Switch or add a league.";
+      (curMarket ? `; Bid$ from ${curMarket.label}, market scale ${mScale.toFixed(2)}` : "") + ". Switch or add a league.";
   }
 }
 
@@ -1742,7 +1783,7 @@ function advise(p) {
   const fit = planFit(p, ps);
   const inf = inflation();
   const deal = dealOf(p);
-  const est = (doc.market && p.y_avg != null)
+  const est = (curMarket && p.y_avg != null)
     ? Math.max(1, Math.round(p.y_avg * mScale * inf.ratio)) : null;
   const val = p.usd != null ? Math.max(1, Math.round(p.usd)) : 1;
   let worth = val;   /* the displayed value; K/DEF override it with the plan */

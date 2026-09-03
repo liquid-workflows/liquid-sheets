@@ -17,7 +17,7 @@ const META = "meta";
 const SHARED = "shared";
 const LEGACY = "main";           // pre-multi-league single-doc key
 const HANDLE_KEY = "filehandle";
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const lkey = (id) => `league:${id}`;
 const isLeagueKey = (k) => typeof k === "string" && k.startsWith("league:");
@@ -116,6 +116,15 @@ export function migrate(doc) {
   if (!doc.ui.planVariant) doc.ui.planVariant = "default";
   if (!("availFade" in doc.ui)) doc.ui.availFade = true;   // availability fade on
   if (!("id" in doc)) doc.id = null;
+  /* schema 4: markets keyed by platform label; Bid$ follows league.platform
+   * (no picker). Fold the old single doc.market, which "last import wins"
+   * used to overwrite, into the map so nothing already imported is lost. */
+  if (!doc.markets) doc.markets = {};
+  if (doc.market) {
+    const k = doc.market.label || "yahoo";
+    if (!doc.markets[k]) doc.markets[k] = { ...doc.market, label: k };
+    delete doc.market;
+  }
   doc.schema_version = SCHEMA_VERSION;
   return doc;
 }
@@ -161,6 +170,7 @@ export function newDoc() {
     journal: [],           // append-only sale journal (M3)
     calls: [],             // My Calls: [{pid, delta}]; empty
     favorites: [],         // favorited player ids
+    markets: {},           // platform label -> {label, as_of, imported_at, values}
     ui: { theme: "dark", themeChosen: false, run: null,
       planVariant: "default", availFade: true },
   };

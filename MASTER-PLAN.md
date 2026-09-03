@@ -223,3 +223,14 @@ matching onto the Sleeper-established board with unmatched names reported.
 Amends DATA-IN-SPEC (recorded there and in ADR-0012). Lesson: verify CORS with
 a real preflight before ruling an API out; the paste preset stays on the
 roadmap as the fallback and needs a real ESPN paste sample to build.
+
+### Markets per platform; Bid$ follows the league platform (2026-09-03)
+
+The ESPN button exposed a trap: `doc.market` was one object and every values
+import overwrote it, so Yahoo then ESPN silently lost Yahoo. Fixed by keeping
+every market under its label (`doc.markets`, schema 4 with a migration) and
+letting the league's Platform setting choose which one drives Bid$ (Levi: no
+picker, link it to the platform). Two things surfaced while doing it: the
+Platform setting from the spec's wizard step 1 had never been built (every
+league was silently "yahoo"), and the ESPN auction-variant check read the
+wrong scoring path and always chose STANDARD. Both fixed. ADR-0013.
